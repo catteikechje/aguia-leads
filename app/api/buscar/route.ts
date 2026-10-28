@@ -173,7 +173,10 @@ async function buscarMapaLivre(nicho: string, cidade: string, uf: string) {
     return NextResponse.json(emCache.dados);
   }
   try {
-    const { empresas, analisadas } = await buscarNoOsm(nicho, cidade, uf);
+    const { empresas, analisadas, cidadeEncontrada } = await buscarNoOsm(nicho, cidade, uf);
+    if (!cidadeEncontrada) {
+      return NextResponse.json({ erro: `Não achei a cidade "${cidade}" em ${uf}. Confira o nome.` }, { status: 404 });
+    }
     // Primeiro quem tem celular (WhatsApp), depois quem tem telefone, depois o resto.
     empresas.sort((a, b) => Number(b.whatsapp) - Number(a.whatsapp) || Number(!!b.telefone) - Number(!!a.telefone));
     const resposta: RespostaBusca = { empresas, analisadas, consulta, fonte: "mapa" };

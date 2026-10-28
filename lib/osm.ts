@@ -4,9 +4,18 @@ import type { Empresa } from "@/lib/types";
 // https://wiki.openstreetmap.org/wiki/Overpass_API
 const SERVIDORES = [
   "https://overpass-api.de/api/interpreter",
+  "https://overpass.openstreetmap.fr/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter",
 ];
+const AGENTE = "AguiaLeads/1.0 (aivio-ia.com.br)";
+const NOMES_UF: Record<string, string> = {
+  AC: "Acre", AL: "Alagoas", AP: "Amapá", AM: "Amazonas", BA: "Bahia", CE: "Ceará",
+  DF: "Distrito Federal", ES: "Espírito Santo", GO: "Goiás", MA: "Maranhão", MT: "Mato Grosso",
+  MS: "Mato Grosso do Sul", MG: "Minas Gerais", PA: "Pará", PB: "Paraíba", PR: "Paraná",
+  PE: "Pernambuco", PI: "Piauí", RJ: "Rio de Janeiro", RN: "Rio Grande do Norte",
+  RS: "Rio Grande do Sul", RO: "Rondônia", RR: "Roraima", SC: "Santa Catarina", SP: "São Paulo",
+  SE: "Sergipe", TO: "Tocantins",
+};
 const MAX_RESULTADOS = 300;
 
 // Nicho -> filtros de tags do OpenStreetMap. Cada filtro vira uma linha `nwr[...]` da consulta.
@@ -61,11 +70,35 @@ function filtrosDoNicho(nicho: string) {
   return [`["name"~"${escaparRegex(nicho)}",i]`];
 }
 
-function montarConsulta(nicho: string, cidade: string, uf: string) {
-  const linhas = filtrosDoNicho(nicho).map((f) => `  nwr${f}(area.c);`).join("\n");
-  return `[out:json][timeout:40];
-area["ISO3166-2"="BR-${uf}"]->.uf;
-area["boundary"="administrative"]["admin_level"="8"]["name"~"^${escaparRegex(cidade)}$",i](area.uf)->.c;
+// Caixa da cidade (sul, oeste, norte, leste) pelo Nominatim, o buscador de endereços do OpenStreetMap.
+const caixas = new Map<string, string>();
+async function caixaDaCidade(cidade: string, uf: string) {
+  const chave = `${semAcento(cidade)}|${uf}`;
+  const salva = caixas.get(chave);
+  if (salva) return salva;
+  const q = new URLSearchParams({
+    city: cidade,
+    state: NOMES_UF[uf] ?? uf,
+    country: "Brasil",
+    format: "json",
+    limit: "1",
+  });
+  const r = await fetch(`https://nominatim.openstreetmap.org/search?${q}`, {
+    headers: { "User-Agent": AGENTE, "Accept-Language": "pt-BR" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!r.ok) throw new Error(`Nominatim respondeu ${r.status}`);
+  const [lugar] = (await r.json()) as { boundingbox?: string[] }[];
+  if (!lugar?.boundingbox) return null;
+  const [sul, norte, oeste, leste] = lugar.boundingbox;
+  const caixa = `${sul},${oeste},${norte},${leste}`;
+  caixas.set(chave, caixa);
+  return caixa;
+}
+
+function montarConsulta(nicho: string, caixa: string) {
+  const linhas = filtrosDoNicho(nicho).map((f) => `  nwr${f}(${caixa});`).join("\n");
+  return `[out:json][timeout:25];
 (
 ${linhas}
 );
@@ -129,40 +162,44 @@ function paraEmpresa(el: Elemento, nicho: string, cidade: string, uf: string): E
 }
 
 export async function buscarNoOsm(nicho: string, cidade: string, uf: string) {
-  const consulta = montarConsulta(nicho, cidade, uf);
-  let ultimoErro = "";
-  for (const url of SERVIDORES) {
-    try {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "AguiaLeads/1.0 (busca de empresas sem site)",
-        },
-        body: "data=" + encodeURIComponent(consulta),
-        cache: "no-store",
-        signal: AbortSignal.timeout(45_000),
-      });
-      if (!r.ok) {
-        ultimoErro = `${url} respondeu ${r.status}`;
-        continue;
-      }
-      const dados = (await r.json()) as { elements?: Elemento[] };
-      const elementos = dados.elements ?? [];
-      const vistos = new Set<string>();
-      const empresas = elementos
-        .map((el) => paraEmpresa(el, nicho, cidade, uf))
-        .filter((e): e is Empresa => {
-          if (!e) return false;
-          const chave = semAcento(e.nome) + "|" + e.telefone;
-          if (vistos.has(chave)) return false;
-          vistos.add(chave);
-          return true;
-        });
-      return { empresas, analisadas: elementos.length };
-    } catch (err) {
-      ultimoErro = `${url}: ${err instanceof Error ? err.message : String(err)}`;
-    }
+  const caixa = await caixaDaCidade(cidade, uf);
+  if (!caixa) return { empresas: [], analisadas: 0, cidadeEncontrada: false };
+  const consulta = montarConsulta(nicho, caixa);
+
+  // Os servidores públicos do Overpass às vezes ficam lotados: pergunta a todos e usa o primeiro que responder.
+  const controle = new AbortController();
+  const tentativas = SERVIDORES.map(async (url) => {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": AGENTE },
+      body: "data=" + encodeURIComponent(consulta),
+      cache: "no-store",
+      signal: AbortSignal.any([controle.signal, AbortSignal.timeout(30_000)]),
+    });
+    if (!r.ok) throw new Error(`${url} respondeu ${r.status}`);
+    const dados = (await r.json()) as { elements?: Elemento[]; remark?: string };
+    if (!dados.elements) throw new Error(`${url}: ${dados.remark ?? "resposta sem dados"}`);
+    return dados.elements;
+  });
+  let elementos: Elemento[];
+  try {
+    elementos = await Promise.any(tentativas);
+  } catch (err) {
+    const motivos = err instanceof AggregateError ? err.errors.map(String).join(" | ") : String(err);
+    throw new Error(motivos || "Mapa indisponível");
+  } finally {
+    controle.abort();
   }
-  throw new Error(ultimoErro || "Mapa indisponível");
+
+  const vistos = new Set<string>();
+  const empresas = elementos
+    .map((el) => paraEmpresa(el, nicho, cidade, uf))
+    .filter((e): e is Empresa => {
+      if (!e) return false;
+      const chave = semAcento(e.nome) + "|" + e.telefone;
+      if (vistos.has(chave)) return false;
+      vistos.add(chave);
+      return true;
+    });
+  return { empresas, analisadas: elementos.length, cidadeEncontrada: true };
 }
