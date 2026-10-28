@@ -80,8 +80,8 @@ export default function Radar() {
         </span>
       </header>
 
-      <h1>Empresas reais <em>sem site</em>, direto do Google</h1>
-      <p className="sub">Escolha o nicho e a cidade. A lista mostra quem está no Google Maps sem site próprio (ou só com Instagram) e com telefone.</p>
+      <h1>Empresas reais <em>sem site</em>, direto do mapa</h1>
+      <p className="sub">Escolha o nicho e a cidade. A lista mostra empresas reais que estão no mapa sem site próprio (ou só com Instagram). Quem tem WhatsApp aparece primeiro.</p>
 
       <form className="filtros" onSubmit={buscar}>
         <label>
@@ -100,11 +100,11 @@ export default function Radar() {
           <input value={cidade} onChange={(e) => setCidade(e.target.value)} required />
         </label>
         <label>
-          <span className="rotulo">Senha de acesso</span>
+          <span className="rotulo">Senha (opcional)</span>
           <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="current-password" />
         </label>
         <button className="btn-primario" type="submit" disabled={carregando}>
-          {carregando ? "Buscando no Google..." : "Buscar empresas sem site"}
+          {carregando ? "Buscando empresas..." : "Buscar empresas sem site"}
         </button>
       </form>
 
@@ -114,7 +114,7 @@ export default function Radar() {
         <section>
           <div className="res-topo">
             <h2>{visiveis.length} sem site · {titulo}</h2>
-            <span className="mono">{resultado.analisadas} empresas analisadas no Google</span>
+            <span className="mono">{resultado.analisadas} empresas analisadas {resultado.fonte === "google" ? "no Google" : "no mapa"}</span>
           </div>
           {visiveis.length === 0 ? (
             <p className="vazio">Nenhuma empresa sem site nessa busca. Tente outro bairro, cidade ou nicho.</p>
@@ -133,8 +133,8 @@ export default function Radar() {
                       <span>{emp.endereco}</span>
                     </div>
                     <div className="fone">
-                      <span className="mono">{emp.telefone}</span>
-                      <span className={emp.whatsapp ? "ok" : "mut"}>{emp.whatsapp ? "WhatsApp provável" : "telefone fixo"}</span>
+                      <span className="mono">{emp.telefone || "telefone não informado"}</span>
+                      {emp.telefone && <span className={emp.whatsapp ? "ok" : "mut"}>{emp.whatsapp ? "WhatsApp provável" : "telefone fixo"}</span>}
                     </div>
                     <div className="linha-meta">
                       {emp.nota ? <span className="estrelas">★ {emp.nota.toFixed(1)} ({emp.avaliacoes})</span> : <span className="mut">sem avaliações</span>}
@@ -144,8 +144,10 @@ export default function Radar() {
                       <button className={"btn-wa" + (jaChamou ? " feito" : "")} type="button" onClick={() => setAberta(emp)}>
                         {jaChamou ? "✓ Chamado hoje · abrir de novo" : "Chamar no WhatsApp"}
                       </button>
-                    ) : (
+                    ) : emp.telefone ? (
                       <a className="btn-ghost" href={`tel:+55${emp.telefone.replace(/\D/g, "")}`}>Ligar</a>
+                    ) : (
+                      <a className="btn-ghost" href={emp.mapsUrl} target="_blank" rel="noopener">Achar o telefone no Google</a>
                     )}
                   </article>
                 );

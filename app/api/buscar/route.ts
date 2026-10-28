@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import type { Empresa, RespostaBusca } from "@/lib/types";
+import { buscarNoOsm } from "@/lib/osm";
+
+export const maxDuration = 60;
 
 // Google Places API (New) - Text Search.
 // https://developers.google.com/maps/documentation/places/web-service/text-search
@@ -76,18 +79,6 @@ function paraEmpresa(p: Place, tipoBuscado: string): Empresa {
 }
 
 export async function POST(req: Request) {
-  const senha = process.env.APP_SENHA;
-  if (senha && req.headers.get("x-senha") !== senha) {
-    return NextResponse.json({ erro: "Senha incorreta." }, { status: 401 });
-  }
-  const chave = process.env.GOOGLE_PLACES_API_KEY;
-  if (!chave) {
-    return NextResponse.json(
-      { erro: "Falta configurar GOOGLE_PLACES_API_KEY no servidor." },
-      { status: 500 },
-    );
-  }
-
   const corpo = (await req.json().catch(() => ({}))) as {
     nicho?: string;
     cidade?: string;
@@ -98,6 +89,16 @@ export async function POST(req: Request) {
   const uf = (corpo.uf ?? "").trim().slice(0, 2).toUpperCase();
   if (!nicho || !cidade || !uf) {
     return NextResponse.json({ erro: "Informe nicho, cidade e estado." }, { status: 400 });
+  }
+
+  // Sem chave do Google, busca no OpenStreetMap (grátis, sem senha).
+  const chave = process.env.GOOGLE_PLACES_API_KEY;
+  if (!chave) return buscarMapaLivre(nicho, cidade, uf);
+
+  // A senha só protege a cota paga do Google.
+  const senha = process.env.APP_SENHA;
+  if (senha && req.headers.get("x-senha") !== senha) {
+    return NextResponse.json({ erro: "Senha incorreta." }, { status: 401 });
   }
 
   const consulta = `${nicho} em ${cidade}, ${uf}, Brasil`;
@@ -147,7 +148,30 @@ export async function POST(req: Request) {
     .map((p) => paraEmpresa(p, nicho))
     .sort((a, b) => Number(b.whatsapp) - Number(a.whatsapp) || b.avaliacoes - a.avaliacoes);
 
-  const resposta: RespostaBusca = { empresas, analisadas: places.length, consulta };
+  const resposta: RespostaBusca = { empresas, analisadas: places.length, consulta, fonte: "google" };
   cache.set(chaveCache, { em: Date.now(), dados: resposta });
   return NextResponse.json(resposta);
+}
+
+async function buscarMapaLivre(nicho: string, cidade: string, uf: string) {
+  const consulta = `${nicho} em ${cidade}, ${uf}`;
+  const chaveCache = "osm:" + consulta.toLowerCase();
+  const emCache = cache.get(chaveCache);
+  if (emCache && Date.now() - emCache.em < CACHE_MS) {
+    return NextResponse.json(emCache.dados);
+  }
+  try {
+    const { empresas, analisadas } = await buscarNoOsm(nicho, cidade, uf);
+    // Primeiro quem tem celular (WhatsApp), depois quem tem telefone, depois o resto.
+    empresas.sort((a, b) => Number(b.whatsapp) - Number(a.whatsapp) || Number(!!b.telefone) - Number(!!a.telefone));
+    const resposta: RespostaBusca = { empresas, analisadas, consulta, fonte: "mapa" };
+    cache.set(chaveCache, { em: Date.now(), dados: resposta });
+    return NextResponse.json(resposta);
+  } catch (err) {
+    console.error("Erro no OpenStreetMap", err);
+    return NextResponse.json(
+      { erro: "O mapa está ocupado agora. Tente de novo em alguns segundos." },
+      { status: 502 },
+    );
+  }
 }

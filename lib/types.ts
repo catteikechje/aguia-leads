@@ -16,6 +16,7 @@ export type Empresa = {
 
 export type RespostaBusca = {
   empresas: Empresa[];
-  analisadas: number; // quantas o Google devolveu antes de filtrar quem tem site
+  analisadas: number; // quantas a fonte devolveu antes de filtrar quem tem site
   consulta: string;
+  fonte: "google" | "mapa"; // mapa = OpenStreetMap, usado quando não há chave do Google
 };

@@ -28,7 +28,7 @@ export const MODELOS: Modelo[] = [
   {
     nome: "Elogio às avaliações",
     texto: (e, eu) =>
-      `Oi! ${eu ? `Aqui é ${eu}, trabalho` : "Trabalho"} com sites para comércios em ${local(e)}. Vi as avaliações da ${e.nome} no Google${nota(e) ? `, nota ${nota(e)}` : ""}, parabéns pelo trabalho! Senti falta só de um site com os serviços e o botão do WhatsApp. Faz sentido conversarmos sobre isso?`,
+      `Oi! ${eu ? `Aqui é ${eu}, trabalho` : "Trabalho"} com sites para comércios em ${local(e)}. ${e.avaliacoes ? `Vi as avaliações da ${e.nome} no Google${nota(e) ? `, nota ${nota(e)}` : ""}, parabéns pelo trabalho!` : `Conheci a ${e.nome} e gostei do trabalho de vocês.`} Senti falta só de um site com os serviços e o botão do WhatsApp. Faz sentido conversarmos sobre isso?`,
   },
   {
     nome: "Clientes da região",
