@@ -78,6 +78,18 @@ function paraEmpresa(p: Place, tipoBuscado: string): Empresa {
   };
 }
 
+// GET /api/buscar?nicho=Barbearia&cidade=Recife&uf=PE (só no mapa grátis; o Google exige POST com senha).
+export async function GET(req: Request) {
+  const q = new URL(req.url).searchParams;
+  const nicho = (q.get("nicho") ?? "").trim().slice(0, 80);
+  const cidade = (q.get("cidade") ?? "").trim().slice(0, 80);
+  const uf = (q.get("uf") ?? "").trim().slice(0, 2).toUpperCase();
+  if (!nicho || !cidade || !uf) {
+    return NextResponse.json({ erro: "Informe nicho, cidade e estado." }, { status: 400 });
+  }
+  return buscarMapaLivre(nicho, cidade, uf);
+}
+
 export async function POST(req: Request) {
   const corpo = (await req.json().catch(() => ({}))) as {
     nicho?: string;
