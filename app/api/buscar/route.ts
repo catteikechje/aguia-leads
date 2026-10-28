@@ -180,7 +180,8 @@ async function buscarMapaLivre(nicho: string, cidade: string, uf: string) {
     // Primeiro quem tem celular (WhatsApp), depois quem tem telefone, depois o resto.
     empresas.sort((a, b) => Number(b.whatsapp) - Number(a.whatsapp) || Number(!!b.telefone) - Number(!!a.telefone));
     const resposta: RespostaBusca = { empresas, analisadas, consulta, fonte: "mapa" };
-    cache.set(chaveCache, { em: Date.now(), dados: resposta });
+    // Resultado vazio pode ser falha passageira do servidor: não guarda.
+    if (analisadas > 0) cache.set(chaveCache, { em: Date.now(), dados: resposta });
     return NextResponse.json(resposta);
   } catch (err) {
     console.error("Erro no OpenStreetMap", err);

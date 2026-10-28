@@ -53,6 +53,51 @@ const FILTROS: Record<string, string[]> = {
   contabilidade: ['["office"~"accountant|tax_advisor"]'],
   "escola de idiomas": ['["amenity"="language_school"]'],
   "buffet infantil": ['["name"~"buffet",i]'],
+  // Sinônimos e nichos que as pessoas costumam digitar.
+  estetica: ['["shop"="beauty"]', '["shop"="cosmetics"]', '["amenity"="clinic"]["name"~"est[eé]tica",i]'],
+  "estetica automotiva": ['["shop"="car_repair"]["car_repair"~"detailing"]', '["name"~"est[eé]tica automotiva|detail|polimento|vitrifica",i]'],
+  salao: ['["shop"="hairdresser"]', '["shop"="beauty"]'],
+  cabeleireiro: ['["shop"="hairdresser"]'],
+  manicure: ['["shop"="beauty"]["beauty"~"nails"]', '["name"~"unha|nail|manicure",i]'],
+  depilacao: ['["shop"="beauty"]["beauty"~"waxing|hair_removal"]', '["name"~"depila",i]'],
+  sobrancelha: ['["shop"="beauty"]["name"~"sobrancelha|brow|c[ií]lio",i]'],
+  maquiagem: ['["shop"="cosmetics"]', '["shop"="beauty"]["name"~"make|maqui",i]'],
+  cosmeticos: ['["shop"~"cosmetics|perfumery"]'],
+  spa: ['["leisure"="spa"]', '["shop"="beauty"]["name"~"spa",i]', '["shop"="massage"]'],
+  massagem: ['["shop"="massage"]', '["name"~"massag",i]'],
+  tatuagem: ['["shop"="tattoo"]'],
+  dentista: ['["amenity"="dentist"]', '["healthcare"="dentist"]'],
+  mecanica: ['["shop"="car_repair"]', '["craft"="car_repair"]'],
+  "lava rapido": ['["amenity"="car_wash"]'],
+  "auto escola": ['["amenity"="driving_school"]'],
+  autoescola: ['["amenity"="driving_school"]'],
+  veterinario: ['["amenity"="veterinary"]'],
+  "clinica veterinaria": ['["amenity"="veterinary"]'],
+  fisioterapia: ['["healthcare"="physiotherapist"]', '["name"~"fisio",i]'],
+  psicologo: ['["healthcare"="psychotherapist"]', '["name"~"psic[oó]log",i]'],
+  advogado: ['["office"="lawyer"]'],
+  advocacia: ['["office"="lawyer"]'],
+  farmacia: ['["amenity"="pharmacy"]'],
+  mercado: ['["shop"~"supermarket|convenience|greengrocer"]'],
+  acougue: ['["shop"="butcher"]'],
+  sorveteria: ['["amenity"="ice_cream"]', '["shop"="ice_cream"]'],
+  cafeteria: ['["amenity"="cafe"]'],
+  bar: ['["amenity"~"bar|pub"]'],
+  pousada: ['["tourism"~"guest_house|hostel"]'],
+  hotel: ['["tourism"="hotel"]'],
+  grafica: ['["shop"="copyshop"]', '["craft"="printer"]', '["name"~"gr[aá]fica",i]'],
+  costureira: ['["craft"~"dressmaker|tailor"]', '["shop"="tailor"]'],
+  "escola infantil": ['["amenity"~"kindergarten|childcare"]'],
+  creche: ['["amenity"~"kindergarten|childcare"]'],
+  papelaria: ['["shop"="stationery"]'],
+  "loja de moveis": ['["shop"="furniture"]'],
+  marcenaria: ['["craft"="carpenter"]', '["name"~"marcenar",i]'],
+  eletricista: ['["craft"="electrician"]'],
+  "eletronica": ['["shop"="electronics"]', '["craft"="electronics_repair"]'],
+  joalheria: ['["shop"="jewelry"]'],
+  "loja de calcados": ['["shop"="shoes"]'],
+  sapataria: ['["shop"="shoes"]', '["craft"="shoemaker"]'],
+  lavanderia: ['["shop"~"laundry|dry_cleaning"]'],
 };
 
 function semAcento(s: string) {
@@ -63,11 +108,28 @@ function escaparRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\"]/g, "\\$&");
 }
 
+// "estetica" -> "[eéêè]st[eéêè]t[iíî]c[aáàâã]": acha o nome com ou sem acento.
+function regexSemAcento(texto: string) {
+  const classes: Record<string, string> = {
+    a: "[aáàâã]", e: "[eéêè]", i: "[iíî]", o: "[oóôõ]", u: "[uúü]", c: "[cç]",
+  };
+  return escaparRegex(semAcento(texto))
+    .split("")
+    .map((ch) => classes[ch] ?? ch)
+    .join("");
+}
+
 function filtrosDoNicho(nicho: string) {
-  const conhecido = FILTROS[semAcento(nicho)];
-  if (conhecido) return conhecido;
-  // Nicho livre: procura o texto no nome do estabelecimento.
-  return [`["name"~"${escaparRegex(nicho)}",i]`];
+  const alvo = semAcento(nicho).replace(/\s+/g, " ");
+  // Nome do nicho exato, ou o nicho conhecido mais longo contido no que a pessoa digitou ("estética facial" -> estética).
+  const chave =
+    (FILTROS[alvo] && alvo) ||
+    Object.keys(FILTROS)
+      .filter((k) => alvo.includes(k))
+      .sort((a, b) => b.length - a.length)[0];
+  const porTag = chave ? FILTROS[chave] : [];
+  // Sempre procura também o texto digitado no nome do estabelecimento.
+  return [...porTag, `["name"~"${regexSemAcento(alvo)}",i]`];
 }
 
 // Caixa da cidade (sul, oeste, norte, leste) pelo Nominatim, o buscador de endereços do OpenStreetMap.
@@ -178,7 +240,10 @@ export async function buscarNoOsm(nicho: string, cidade: string, uf: string) {
     });
     if (!r.ok) throw new Error(`${url} respondeu ${r.status}`);
     const dados = (await r.json()) as { elements?: Elemento[]; remark?: string };
-    if (!dados.elements) throw new Error(`${url}: ${dados.remark ?? "resposta sem dados"}`);
+    // Servidor com problema responde 200 com lista vazia e um aviso de erro: não serve.
+    if (!dados.elements || /error|timed out|out of memory/i.test(dados.remark ?? "")) {
+      throw new Error(`${url}: ${dados.remark ?? "resposta sem dados"}`);
+    }
     return dados.elements;
   });
   let elementos: Elemento[];
